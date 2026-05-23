@@ -1,0 +1,79 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #030712;
+  color: #f3f4f6;
+  margin: 0;
+  height: 100%;
+}
+
+/* Custom CBT styles */
+.gradient-cbt {
+  background: radial-gradient(circle at top, #0f172a 0%, #030712 100%);
+}
+
+.glass-panel {
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.neon-glow-blue {
+  box-shadow: 0 0 15px rgba(56, 189, 248, 0.3);
+}
+
+.glow-selected {
+  outline: 2px solid #38bdf8;
+  box-shadow: 0 0 12px 1px rgba(56, 189, 248, 0.25);
+}
+
+.active-question {
+  background: #38bdf8 !important;
+  color: #000000 !important;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.5);
+}
+
+.answered-question {
+  background: #10b981 !important;
+  color: #ffffff !important;
+}
+
+.doubt-question {
+  background: #fbbf24 !important;
+  color: #000000 !important;
+}
+
+/* Anti-Tab Cheat animation overlay */
+@keyframes warning-ping {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.03); opacity: 0.95; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.cheat-warning-active {
+  animation: warning-ping 1s infinite ease-in-out;
+}
+
+/* Scrollbar customizations */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+

@@ -1,0 +1,6 @@
+{
+  "name": "Aplikasi CBT Sekolah",
+  "description": "Sistem Computer Based Test (CBT) ringan, aman, dan responsif untuk ujian sekolah dengan portal siswa dan admin.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

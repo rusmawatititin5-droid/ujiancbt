@@ -2,9 +2,8 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
-import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
-import { Student, Question, ExamSession, StudentAttempt } from "./src/types.js";
+import type { Student, Question, ExamSession, StudentAttempt } from "./src/types.js";
 
 dotenv.config();
 
@@ -17,12 +16,29 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 // Resolve paths
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DATA_DIR = path.join(process.cwd(), "data");
+const DATA_DIR = process.env.VERCEL ? "/tmp" : path.join(process.cwd(), "data");
 const DB_FILE = path.join(DATA_DIR, "db.json");
 
 // Ensure Data Directory and DB File exist
 if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  } catch (err) {
+    console.error("Failed to create DATA_DIR:", err);
+  }
+}
+
+// On Vercel, if DB_FILE in /tmp doesn't exist, check if we have database template to copy from source package
+if (process.env.VERCEL && !fs.existsSync(DB_FILE)) {
+  const templatePath = path.join(process.cwd(), "data", "db.json");
+  if (fs.existsSync(templatePath)) {
+    try {
+      fs.copyFileSync(templatePath, DB_FILE);
+      console.log("[CBT] Seeded database to /tmp/db.json from template");
+    } catch (err) {
+      console.error("[CBT] Failed to copy database template to /tmp:", err);
+    }
+  }
 }
 
 // Initial Seeding Data
@@ -569,6 +585,7 @@ app.get("/api/results", (req, res) => {
 // Dev & Production serving middlewares logic
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa"

@@ -1,0 +1,102 @@
+{
+  "entities": {
+    "student": {
+      "title": "Student",
+      "description": "Information about students taking the exam",
+      "type": "object",
+      "properties": {
+        "nisn": { "type": "string" },
+        "name": { "type": "string" },
+        "classRoom": { "type": "string" },
+        "password": { "type": "string" }
+      },
+      "required": ["nisn", "name", "classRoom", "password"]
+    },
+    "question": {
+      "title": "Question",
+      "description": "Individual exam multiple-choice questions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "subject": { "type": "string" },
+        "text": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "options": {
+          "type": "array",
+          "description": "List of options for MCQ"
+        },
+        "correctAnswer": { "type": "string" }
+      },
+      "required": ["id", "subject", "text", "options", "correctAnswer"]
+    },
+    "session": {
+      "title": "ExamSession",
+      "description": "Exam sessions containing subject and duration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "subject": { "type": "string" },
+        "date": { "type": "string" },
+        "duration": { "type": "integer" },
+        "token": { "type": "string" },
+        "isClosed": { "type": "boolean" }
+      },
+      "required": ["id", "subject", "date", "duration", "token", "isClosed"]
+    },
+    "attempt": {
+      "title": "StudentAttempt",
+      "description": "Tracker of students' progress and answers in an exam",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "examSessionId": { "type": "string" },
+        "nisn": { "type": "string" },
+        "studentName": { "type": "string" },
+        "classRoom": { "type": "string" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "answers": { "type": "object" },
+        "doubtfulAnswers": { "type": "array" },
+        "isSubmitted": { "type": "boolean" },
+        "score": { "type": "number" },
+        "correctCount": { "type": "integer" },
+        "incorrectCount": { "type": "integer" },
+        "unansweredCount": { "type": "integer" },
+        "antiCheatWarnings": { "type": "integer" }
+      },
+      "required": [
+        "id",
+        "examSessionId",
+        "nisn",
+        "studentName",
+        "classRoom",
+        "startTime",
+        "answers",
+        "isSubmitted",
+        "score",
+        "correctCount",
+        "incorrectCount",
+        "unansweredCount",
+        "antiCheatWarnings"
+      ]
+    }
+  },
+  "firestore": {
+    "students/{nisn}": {
+      "schema": "student",
+      "description": "Collection of students indexed by NISN"
+    },
+    "questions/{questionId}": {
+      "schema": "question",
+      "description": "Collection of exam questions"
+    },
+    "sessions/{sessionId}": {
+      "schema": "session",
+      "description": "Collection of exam sessions"
+    },
+    "attempts/{attemptId}": {
+      "schema": "attempt",
+      "description": "Collection of student exam attempts and tracking states"
+    }
+  }
+}

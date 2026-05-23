@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ID validation helper
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Helper to extract data
+    function incoming() {
+      return request.resource.data;
+    }
+
+    // Helper for students validation
+    function isValidStudent(data) {
+      return data.nisn is string && data.nisn.size() >= 1 && data.nisn.size() <= 64 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 128 &&
+             data.classRoom is string && data.classRoom.size() >= 1 && data.classRoom.size() <= 64;
+    }
+
+    // Helper for questions validation
+    function isValidQuestion(data) {
+      return data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+             data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 128 &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 5000 &&
+             data.options is list && data.options.size() >= 1 &&
+             data.correctAnswer is string && data.correctAnswer.size() >= 1 && data.correctAnswer.size() <= 5;
+    }
+
+    // Helper for sessions validation
+    function isValidSession(data) {
+      return data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+             data.subject is string && data.subject.size() >= 1 &&
+             data.date is string &&
+             data.duration is int && data.duration > 0 &&
+             data.token is string && data.token.size() >= 1 &&
+             data.isClosed is bool;
+    }
+
+    // Helper for attempts validation
+    function isValidAttempt(data) {
+      return data.id is string && data.id.size() >= 1 &&
+             data.examSessionId is string && data.examSessionId.size() >= 1 &&
+             data.nisn is string && data.nisn.size() >= 1 &&
+             data.studentName is string &&
+             data.classRoom is string &&
+             data.startTime is string &&
+             data.answers is map &&
+             data.isSubmitted is bool &&
+             (data.score is number || data.score is int) &&
+             data.correctCount is int &&
+             data.incorrectCount is int &&
+             data.unansweredCount is int &&
+             data.antiCheatWarnings is int;
+    }
+
+    match /students/{nisn} {
+      allow read, write: if isValidId(nisn) && (request.method == 'delete' || isValidStudent(incoming()));
+    }
+
+    match /questions/{questionId} {
+      allow read, write: if isValidId(questionId) && (request.method == 'delete' || isValidQuestion(incoming()));
+    }
+
+    match /sessions/{sessionId} {
+      allow read, write: if isValidId(sessionId) && (request.method == 'delete' || isValidSession(incoming()));
+    }
+
+    match /attempts/{attemptId} {
+      allow read, write: if isValidId(attemptId) && (request.method == 'delete' || isValidAttempt(incoming()));
+    }
+  }
+}

@@ -4,6 +4,20 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import type { Student, Question, ExamSession, StudentAttempt } from "./src/types.js";
+import { initializeApp } from "firebase/app";
+import { 
+  getFirestore, 
+  collection, 
+  getDocs, 
+  getDoc, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  query, 
+  where,
+  getDocFromServer
+} from "firebase/firestore";
 
 dotenv.config();
 
@@ -14,32 +28,9 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // Resolve paths
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DATA_DIR = process.env.VERCEL ? "/tmp" : path.join(process.cwd(), "data");
-const DB_FILE = path.join(DATA_DIR, "db.json");
-
-// Ensure Data Directory and DB File exist
-if (!fs.existsSync(DATA_DIR)) {
-  try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  } catch (err) {
-    console.error("Failed to create DATA_DIR:", err);
-  }
-}
-
-// On Vercel, if DB_FILE in /tmp doesn't exist, check if we have database template to copy from source package
-if (process.env.VERCEL && !fs.existsSync(DB_FILE)) {
-  const templatePath = path.join(process.cwd(), "data", "db.json");
-  if (fs.existsSync(templatePath)) {
-    try {
-      fs.copyFileSync(templatePath, DB_FILE);
-      console.log("[CBT] Seeded database to /tmp/db.json from template");
-    } catch (err) {
-      console.error("[CBT] Failed to copy database template to /tmp:", err);
-    }
-  }
-}
+const hasImportMetaUrl = typeof import.meta !== "undefined" && !!import.meta.url;
+const __filename = hasImportMetaUrl ? fileURLToPath(import.meta.url) : "server.js";
+const __dirname = hasImportMetaUrl ? path.dirname(__filename) : process.cwd();
 
 // Initial Seeding Data
 const initialStudents: Student[] = [
@@ -68,7 +59,7 @@ const initialQuestions: Question[] = [
     id: "q2",
     subject: "Matematika",
     text: "Di bawah ini, manakah grafik yang menunjukkan fungsi eksponensial y = 2^x?",
-    imageUrl: "https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=400&auto=format&fit=crop&q=60", // Math background illustrative
+    imageUrl: "https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=400&auto=format&fit=crop&q=60",
     options: [
       { key: "A", text: "Garis lurus naik dari kiri bawah ke kanan atas" },
       { key: "B", text: "Kurva mulus yang memotong sumbu Y di (0,1) dan meningkat sangat cepat dibanding sumbu X positif" },
@@ -121,7 +112,7 @@ const initialQuestions: Question[] = [
     id: "q6",
     subject: "Fisika",
     text: "Manakah dari diagram berikut yang mendemonstrasikan sistem pengungkit jenis pertama (tuas golongan 1) dengan titik tumpu berada di antara beban dan kuasa?",
-    imageUrl: "https://images.unsplash.com/photo-1544383835-bda2bc66a55d?w=400&auto=format&fit=crop&q=60", // physics tools
+    imageUrl: "https://images.unsplash.com/photo-1544383835-bda2bc66a55d?w=400&auto=format&fit=crop&q=60",
     options: [
       { key: "A", text: "Gunting atau jungkat-jungkit (Titik Tumpu di tengah)" },
       { key: "B", text: "Gerobak roda satu (Beban di tengah)" },
@@ -134,8 +125,7 @@ const initialQuestions: Question[] = [
   {
     id: "q7",
     subject: "Bahasa Inggris",
-    text: "Choose the correct expression to complete the interview dialog:\nInterviewers: 'Why are you interested in this internship position?'\nApplicant: '... I can apply my knowledge from vocational school.'"
-    ,
+    text: "Choose the correct expression to complete the interview dialog:\nInterviewers: 'Why are you interested in this internship position?'\nApplicant: '... I can apply my knowledge from vocational school.'",
     options: [
       { key: "A", text: "Because I want to make easy money." },
       { key: "B", text: "Because it offers great hands-on learning opportunity where..." },
@@ -174,169 +164,353 @@ const initialSessions: ExamSession[] = [
   }
 ];
 
-interface DBStructure {
-  students: Student[];
-  questions: Question[];
-  sessions: ExamSession[];
-  attempts: StudentAttempt[];
+// Firebase Setup
+const configPath = fs.existsSync(path.join(process.cwd(), "firebase-applet-config.json"))
+  ? path.join(process.cwd(), "firebase-applet-config.json")
+  : path.join(__dirname, "firebase-applet-config.json");
+
+const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+const firebaseApp = initializeApp(firebaseConfig);
+const firestoreDb = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+
+// Test Firestore initialization connection (Skill Critical Requirement)
+async function testConnection() {
+  try {
+    await getDocFromServer(doc(firestoreDb, "test", "connection"));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("the client is offline")) {
+      console.error("[CBT Firebase] Warning: Please check your Firebase configuration or network.");
+    }
+  }
+}
+testConnection();
+
+// Initial Database Seeding to Cloud Firestore
+async function seedInitialDatabase() {
+  try {
+    const studentsSnapshot = await getDocs(collection(firestoreDb, "students"));
+    if (studentsSnapshot.empty) {
+      console.log("[CBT Firebase] Seeding initial students to Firestore...");
+      for (const student of initialStudents) {
+        await setDoc(doc(firestoreDb, "students", student.nisn), student);
+      }
+    }
+
+    const questionsSnapshot = await getDocs(collection(firestoreDb, "questions"));
+    if (questionsSnapshot.empty) {
+      console.log("[CBT Firebase] Seeding initial questions to Firestore...");
+      for (const question of initialQuestions) {
+        await setDoc(doc(firestoreDb, "questions", question.id), question);
+      }
+    }
+
+    const sessionsSnapshot = await getDocs(collection(firestoreDb, "sessions"));
+    if (sessionsSnapshot.empty) {
+      console.log("[CBT Firebase] Seeding initial sessions to Firestore...");
+      for (const s of initialSessions) {
+        await setDoc(doc(firestoreDb, "sessions", s.id), s);
+      }
+    }
+    console.log("[CBT Firebase] Cloud Firestore seeding verify completed.");
+  } catch (error) {
+    console.error("[CBT Firebase] Seeding verify error:", error);
+  }
+}
+seedInitialDatabase();
+
+// Firestore Error handler interface & function (Skill requirement)
+enum OperationType {
+  CREATE = "create",
+  UPDATE = "update",
+  DELETE = "delete",
+  LIST = "list",
+  GET = "get",
+  WRITE = "write",
 }
 
-const loadDB = (): DBStructure => {
-  try {
-    if (fs.existsSync(DB_FILE)) {
-      const content = fs.readFileSync(DB_FILE, "utf-8");
-      return JSON.parse(content);
-    }
-  } catch (error) {
-    console.error("Error reading database file, resetting to blank details", error);
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
   }
-  // Default Seed
-  const dbData: DBStructure = {
-    students: initialStudents,
-    questions: initialQuestions,
-    sessions: initialSessions,
-    attempts: []
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {},
+    operationType,
+    path
   };
-  saveDB(dbData);
-  return dbData;
-};
+  console.error("Firestore Error: ", JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
-const saveDB = (dbData: DBStructure) => {
-  try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(dbData, null, 2), "utf-8");
-  } catch (error) {
-    console.error("Failed to save database file:", error);
+// Helper to query all questions from Firestore
+async function getAllQuestions(): Promise<Question[]> {
+  const querySnapshot = await getDocs(collection(firestoreDb, "questions")).catch(err => {
+    handleFirestoreError(err, OperationType.LIST, "questions");
+  });
+  const list: Question[] = [];
+  if (querySnapshot) {
+    querySnapshot.forEach(doc => {
+      list.push(doc.data() as Question);
+    });
   }
-};
+  return list;
+}
 
-// Auto boot database
-let db = loadDB();
+// Helper to query all sessions from Firestore
+async function getAllSessions(): Promise<ExamSession[]> {
+  const querySnapshot = await getDocs(collection(firestoreDb, "sessions")).catch(err => {
+    handleFirestoreError(err, OperationType.LIST, "sessions");
+  });
+  const list: ExamSession[] = [];
+  if (querySnapshot) {
+    querySnapshot.forEach(doc => {
+      list.push(doc.data() as ExamSession);
+    });
+  }
+  return list;
+}
 
-// API ROUTES: Authenticaton
-app.post("/api/auth/login", (req, res) => {
+// API ROUTES: Authentication
+app.post("/api/auth/login", async (req, res) => {
   const { role, username, nisn, password } = req.body;
 
-  if (role === "admin") {
-    if (username === "admin" && password === "admin123") {
-      return res.json({ success: true, role: "admin", name: "Kepala Kurikulum / Admin" });
-    }
-    return res.status(401).json({ success: false, message: "Username atau Password Admin salah!" });
-  } else if (role === "student") {
-    const student = db.students.find(s => s.nisn === nisn);
-    if (!student) {
-      return res.status(401).json({ success: false, message: "NISN tidak terdaftar di database sekolah." });
-    }
-    // Checking password (default '123' if not matches)
-    const storedPassword = student.password || "123";
-    if (password === storedPassword) {
-      return res.json({
-        success: true,
-        role: "student",
-        student: {
-          nisn: student.nisn,
-          name: student.name,
-          classRoom: student.classRoom
-        }
+  try {
+    if (role === "admin") {
+      if (username === "admin" && password === "admin123") {
+        return res.json({ success: true, role: "admin", name: "Kepala Kurikulum / Admin" });
+      }
+      return res.status(401).json({ success: false, message: "Username atau Password Admin salah!" });
+    } else if (role === "student") {
+      if (!nisn) {
+        return res.status(400).json({ success: false, message: "NISN diperlukan." });
+      }
+      const studentDocRef = doc(firestoreDb, "students", nisn);
+      const studentDoc = await getDoc(studentDocRef).catch(err => {
+        handleFirestoreError(err, OperationType.GET, `students/${nisn}`);
       });
+      
+      if (!studentDoc || !studentDoc.exists()) {
+        return res.status(401).json({ success: false, message: "NISN tidak terdaftar di database sekolah." });
+      }
+      
+      const student = studentDoc.data() as Student;
+      // Checking password (default '123' if not matches)
+      const storedPassword = student.password || "123";
+      if (password === storedPassword) {
+        return res.json({
+          success: true,
+          role: "student",
+          student: {
+            nisn: student.nisn,
+            name: student.name,
+            classRoom: student.classRoom
+          }
+        });
+      }
+      return res.status(401).json({ success: false, message: "Sandi NISN salah. (Kunci Asal: 123)" });
     }
-    return res.status(401).json({ success: false, message: "Sandi NISN salah. (Kunci Asal: 123)" });
-  }
 
-  return res.status(400).json({ success: false, message: "Peran autentikasi tidak valid." });
+    return res.status(400).json({ success: false, message: "Peran autentikasi tidak valid." });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error instanceof Error ? error.message : "Internal Server Error" });
+  }
 });
 
 // API: Students CRUD
-app.get("/api/students", (req, res) => {
-  res.json(db.students);
+app.get("/api/students", async (req, res) => {
+  try {
+    const querySnapshot = await getDocs(collection(firestoreDb, "students")).catch(err => {
+      handleFirestoreError(err, OperationType.LIST, "students");
+    });
+    const students: Student[] = [];
+    if (querySnapshot) {
+      querySnapshot.forEach(doc => {
+        students.push(doc.data() as Student);
+      });
+    }
+    res.json(students);
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Gagal mengambil data siswa." });
+  }
 });
 
-app.post("/api/students", (req, res) => {
+app.post("/api/students", async (req, res) => {
   const student: Student = req.body;
   if (!student.nisn || !student.name || !student.classRoom) {
     return res.status(400).json({ message: "Data siswa kurang lengkap. Isi NISN, Nama, dan Kelas." });
   }
 
-  // Check unique NISN
-  if (db.students.some(s => s.nisn === student.nisn)) {
-    return res.status(400).json({ message: `Siswa dengan NISN ${student.nisn} sudah terdaftar!` });
-  }
+  try {
+    const studentDocRef = doc(firestoreDb, "students", student.nisn);
+    const studentExists = await getDoc(studentDocRef).catch(err => {
+      handleFirestoreError(err, OperationType.GET, `students/${student.nisn}`);
+    });
+    
+    if (studentExists && studentExists.exists()) {
+      return res.status(400).json({ message: `Siswa dengan NISN ${student.nisn} sudah terdaftar!` });
+    }
 
-  if (!student.password) {
-    student.password = "123"; // default password
-  }
+    if (!student.password) {
+      student.password = "123"; // default password
+    }
 
-  db.students.push(student);
-  saveDB(db);
-  res.status(201).json(student);
+    await setDoc(studentDocRef, student).catch(err => {
+      handleFirestoreError(err, OperationType.CREATE, `students/${student.nisn}`);
+    });
+    
+    res.status(201).json(student);
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Gagal menambahkan siswa." });
+  }
 });
 
-app.put("/api/students/:nisn", (req, res) => {
+app.put("/api/students/:nisn", async (req, res) => {
   const { nisn } = req.params;
   const updatedData: Partial<Student> = req.body;
 
-  const idx = db.students.findIndex(s => s.nisn === nisn);
-  if (idx === -1) {
-    return res.status(404).json({ message: "Siswa tidak ditemukan." });
-  }
+  try {
+    const studentDocRef = doc(firestoreDb, "students", nisn);
+    const studentDoc = await getDoc(studentDocRef).catch(err => {
+      handleFirestoreError(err, OperationType.GET, `students/${nisn}`);
+    });
+    if (!studentDoc || !studentDoc.exists()) {
+      return res.status(404).json({ message: "Siswa tidak ditemukan." });
+    }
 
-  db.students[idx] = { ...db.students[idx], ...updatedData };
-  saveDB(db);
-  res.json(db.students[idx]);
+    const merged = { ...studentDoc.data(), ...updatedData };
+    await setDoc(studentDocRef, merged).catch(err => {
+      handleFirestoreError(err, OperationType.UPDATE, `students/${nisn}`);
+    });
+    
+    res.json(merged);
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Gagal memperbarui siswa." });
+  }
 });
 
-app.delete("/api/students/:nisn", (req, res) => {
+app.delete("/api/students/:nisn", async (req, res) => {
   const { nisn } = req.params;
-  db.students = db.students.filter(s => s.nisn !== nisn);
-  // Also clean attempts to maintain consistency
-  db.attempts = db.attempts.filter(a => a.nisn !== nisn);
-  saveDB(db);
-  res.json({ message: "Siswa berhasil dihapus." });
+
+  try {
+    const studentDocRef = doc(firestoreDb, "students", nisn);
+    await deleteDoc(studentDocRef).catch(err => {
+      handleFirestoreError(err, OperationType.DELETE, `students/${nisn}`);
+    });
+
+    // Also clean attempts to maintain consistency
+    const attemptsSnapshot = await getDocs(query(collection(firestoreDb, "attempts"), where("nisn", "==", nisn)));
+    attemptsSnapshot.forEach(async (d) => {
+      await deleteDoc(doc(firestoreDb, "attempts", d.id)).catch(err => {
+        handleFirestoreError(err, OperationType.DELETE, `attempts/${d.id}`);
+      });
+    });
+
+    res.json({ message: "Siswa berhasil dihapus." });
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Gagal menghapus siswa." });
+  }
 });
 
 // API: Questions CRUD
-app.get("/api/questions", (req, res) => {
-  res.json(db.questions);
+app.get("/api/questions", async (req, res) => {
+  try {
+    const querySnapshot = await getDocs(collection(firestoreDb, "questions")).catch(err => {
+      handleFirestoreError(err, OperationType.LIST, "questions");
+    });
+    const questions: Question[] = [];
+    if (querySnapshot) {
+      querySnapshot.forEach(doc => {
+        questions.push(doc.data() as Question);
+      });
+    }
+    res.json(questions);
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Gagal mengambil data soal." });
+  }
 });
 
-app.post("/api/questions", (req, res) => {
+app.post("/api/questions", async (req, res) => {
   const question: Question = req.body;
   if (!question.subject || !question.text || !question.options || !question.correctAnswer) {
     return res.status(400).json({ message: "Gagal membuat soal. Lengkapi subjek, teks soal, opsi multiple choice, dan kunci jawaban." });
   }
 
   question.id = "q_" + Date.now();
-  db.questions.push(question);
-  saveDB(db);
-  res.status(201).json(question);
+
+  try {
+    await setDoc(doc(firestoreDb, "questions", question.id), question).catch(err => {
+      handleFirestoreError(err, OperationType.CREATE, `questions/${question.id}`);
+    });
+    res.status(201).json(question);
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Gagal menambahkan soal." });
+  }
 });
 
-app.put("/api/questions/:id", (req, res) => {
+app.put("/api/questions/:id", async (req, res) => {
   const { id } = req.params;
   const updatedData: Partial<Question> = req.body;
 
-  const idx = db.questions.findIndex(q => q.id === id);
-  if (idx === -1) {
-    return res.status(404).json({ message: "Soal tidak ditemukan." });
-  }
+  try {
+    const questionDocRef = doc(firestoreDb, "questions", id);
+    const questionDoc = await getDoc(questionDocRef).catch(err => {
+      handleFirestoreError(err, OperationType.GET, `questions/${id}`);
+    });
+    if (!questionDoc || !questionDoc.exists()) {
+      return res.status(404).json({ message: "Soal tidak ditemukan." });
+    }
 
-  db.questions[idx] = { ...db.questions[idx], ...updatedData };
-  saveDB(db);
-  res.json(db.questions[idx]);
+    const merged = { ...questionDoc.data(), ...updatedData };
+    await setDoc(questionDocRef, merged).catch(err => {
+      handleFirestoreError(err, OperationType.UPDATE, `questions/${id}`);
+    });
+    res.json(merged);
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Gagal memperbarui soal." });
+  }
 });
 
-app.delete("/api/questions/:id", (req, res) => {
+app.delete("/api/questions/:id", async (req, res) => {
   const { id } = req.params;
-  db.questions = db.questions.filter(q => q.id !== id);
-  saveDB(db);
-  res.json({ message: "Soal berhasil dihapus dari bank soal." });
+
+  try {
+    await deleteDoc(doc(firestoreDb, "questions", id)).catch(err => {
+      handleFirestoreError(err, OperationType.DELETE, `questions/${id}`);
+    });
+    res.json({ message: "Soal berhasil dihapus dari bank soal." });
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Gagal menghapus soal." });
+  }
 });
 
 // API: Exam Sessions CRUD
-app.get("/api/sessions", (req, res) => {
-  res.json(db.sessions);
+app.get("/api/sessions", async (req, res) => {
+  try {
+    const querySnapshot = await getDocs(collection(firestoreDb, "sessions")).catch(err => {
+      handleFirestoreError(err, OperationType.LIST, "sessions");
+    });
+    const sessions: ExamSession[] = [];
+    if (querySnapshot) {
+      querySnapshot.forEach(doc => {
+        sessions.push(doc.data() as ExamSession);
+      });
+    }
+    res.json(sessions);
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Gagal mengambil database sesi." });
+  }
 });
 
-app.post("/api/sessions", (req, res) => {
+app.post("/api/sessions", async (req, res) => {
   const session: ExamSession = req.body;
   if (!session.subject || !session.date || !session.duration || !session.token) {
     return res.status(400).json({ message: "Gagal menyetel sesi. Isi Mata Pelajaran, Tanggal, Durasi (menit), dan Token ujian." });
@@ -344,243 +518,338 @@ app.post("/api/sessions", (req, res) => {
 
   session.id = "s_" + Date.now();
   session.isClosed = false;
-  db.sessions.push(session);
-  saveDB(db);
-  res.status(201).json(session);
+
+  try {
+    await setDoc(doc(firestoreDb, "sessions", session.id), session).catch(err => {
+      handleFirestoreError(err, OperationType.CREATE, `sessions/${session.id}`);
+    });
+    res.status(201).json(session);
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Gagal menyetel sesi baru." });
+  }
 });
 
-app.put("/api/sessions/:id", (req, res) => {
+app.put("/api/sessions/:id", async (req, res) => {
   const { id } = req.params;
   const updatedData: Partial<ExamSession> = req.body;
 
-  const idx = db.sessions.findIndex(s => s.id === id);
-  if (idx === -1) {
-    return res.status(404).json({ message: "Sesi ujian tidak ditemukan." });
-  }
+  try {
+    const sessionDocRef = doc(firestoreDb, "sessions", id);
+    const sessionDoc = await getDoc(sessionDocRef).catch(err => {
+      handleFirestoreError(err, OperationType.GET, `sessions/${id}`);
+    });
+    if (!sessionDoc || !sessionDoc.exists()) {
+      return res.status(404).json({ message: "Sesi ujian tidak ditemukan." });
+    }
 
-  db.sessions[idx] = { ...db.sessions[idx], ...updatedData };
-  saveDB(db);
-  res.json(db.sessions[idx]);
+    const merged = { ...sessionDoc.data(), ...updatedData };
+    await setDoc(sessionDocRef, merged).catch(err => {
+      handleFirestoreError(err, OperationType.UPDATE, `sessions/${id}`);
+    });
+    res.json(merged);
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Gagal mengubah sesi." });
+  }
 });
 
-app.delete("/api/sessions/:id", (req, res) => {
+app.delete("/api/sessions/:id", async (req, res) => {
   const { id } = req.params;
-  db.sessions = db.sessions.filter(s => s.id !== id);
-  // Also clean related attempts
-  db.attempts = db.attempts.filter(a => a.examSessionId !== id);
-  saveDB(db);
-  res.json({ message: "Sesi berhasil dihapus." });
+
+  try {
+    await deleteDoc(doc(firestoreDb, "sessions", id)).catch(err => {
+      handleFirestoreError(err, OperationType.DELETE, `sessions/${id}`);
+    });
+
+    // Also clean related attempts
+    const attemptsSnapshot = await getDocs(query(collection(firestoreDb, "attempts"), where("examSessionId", "==", id)));
+    attemptsSnapshot.forEach(async (d) => {
+      await deleteDoc(doc(firestoreDb, "attempts", d.id)).catch(err => {
+        handleFirestoreError(err, OperationType.DELETE, `attempts/${d.id}`);
+      });
+    });
+
+    res.json({ message: "Sesi berhasil dihapus." });
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Gagal menghapus sesi." });
+  }
 });
 
 // API: Student Exam Actions (Real-time tracking of Answers, Countdown Calculation, Security logs)
 
 // 1. Get current exam status for a student (checks if they have active sessions in progress to resume)
-app.get("/api/exam/status", (req, res) => {
+app.get("/api/exam/status", async (req, res) => {
   const { nisn, sessionId } = req.query;
   if (!nisn || !sessionId) {
     return res.status(400).json({ message: "NISN dan SessionID diperlukan." });
   }
 
-  const attempt = db.attempts.find(a => a.nisn === nisn && a.examSessionId === sessionId);
-  const session = db.sessions.find(s => s.id === sessionId);
+  try {
+    const attemptId = `att_${sessionId}_${nisn}`;
+    const attemptDoc = await getDoc(doc(firestoreDb, "attempts", attemptId)).catch(err => {
+      handleFirestoreError(err, OperationType.GET, `attempts/${attemptId}`);
+    });
+    const sessionDoc = await getDoc(doc(firestoreDb, "sessions", sessionId as string)).catch(err => {
+      handleFirestoreError(err, OperationType.GET, `sessions/${sessionId}`);
+    });
 
-  res.json({ attempt, session });
+    res.json({ 
+      attempt: attemptDoc && attemptDoc.exists() ? attemptDoc.data() : null, 
+      session: sessionDoc && sessionDoc.exists() ? sessionDoc.data() : null 
+    });
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Sistem gagal membaca status ujian." });
+  }
 });
 
 // 2. Start Exam
-app.post("/api/exam/start", (req, res) => {
+app.post("/api/exam/start", async (req, res) => {
   const { nisn, token } = req.body;
 
   if (!nisn || !token) {
     return res.status(400).json({ message: "NISN dan Token diperlukan untuk memulai ujian." });
   }
 
-  // Authenticate student again
-  const student = db.students.find(s => s.nisn === nisn);
-  if (!student) {
-    return res.status(404).json({ message: "Siswa tidak terdaftar." });
-  }
-
-  // Find Session via Token
-  const session = db.sessions.find(s => s.token.toUpperCase().trim() === token.toUpperCase().trim() && !s.isClosed);
-  if (!session) {
-    return res.status(400).json({ message: "Token Ujian tidak valid atau ujian telah ditutup oleh pengawas!" });
-  }
-
-  // Check if they already have an attempt
-  let attempt = db.attempts.find(a => a.nisn === nisn && a.examSessionId === session.id);
-
-  if (attempt) {
-    if (attempt.isSubmitted) {
-      return res.status(400).json({ message: "Anda sudah mengumpulkan ujian ini sebelumnya." });
-    }
-    // Recover existing session (this fully implements "siswa refresh -> timer tidak reset + jawaban aman")
-    return res.json({
-      message: "Melanjutkan sesi ujian yang sedang berjalan.",
-      attempt,
-      session,
-      questions: db.questions.filter(q => q.subject === session.subject)
+  try {
+    // Authenticate student again
+    const studentDoc = await getDoc(doc(firestoreDb, "students", nisn)).catch(err => {
+      handleFirestoreError(err, OperationType.GET, `students/${nisn}`);
     });
+    if (!studentDoc || !studentDoc.exists()) {
+      return res.status(404).json({ message: "Siswa tidak terdaftar." });
+    }
+    const student = studentDoc.data() as Student;
+
+    // Find Session via Token
+    const allSess = await getAllSessions().catch(() => [] as ExamSession[]);
+    const session = allSess.find(s => s.token.toUpperCase().trim() === token.toUpperCase().trim() && !s.isClosed);
+    if (!session) {
+      return res.status(400).json({ message: "Token Ujian tidak valid atau ujian telah ditutup oleh pengawas!" });
+    }
+
+    const attemptId = `att_${session.id}_${nisn}`;
+    // Check if they already have an attempt
+    const attemptDoc = await getDoc(doc(firestoreDb, "attempts", attemptId)).catch(err => {
+      handleFirestoreError(err, OperationType.GET, `attempts/${attemptId}`);
+    });
+
+    const allQ = await getAllQuestions();
+    const questionsForSubject = allQ.filter(q => q.subject === session.subject);
+
+    if (attemptDoc && attemptDoc.exists()) {
+      const attempt = attemptDoc.data() as StudentAttempt;
+      if (attempt.isSubmitted) {
+        return res.status(400).json({ message: "Anda sudah mengumpulkan ujian ini sebelumnya." });
+      }
+      // Recover existing session (this fully implements "siswa refresh -> timer tidak reset + jawaban aman")
+      return res.json({
+        message: "Melanjutkan sesi ujian yang sedang berjalan.",
+        attempt,
+        session,
+        questions: questionsForSubject
+      });
+    }
+
+    if (questionsForSubject.length === 0) {
+      return res.status(400).json({ message: `Belum ada bank soal tersedia untuk mata pelajaran ${session.subject}.` });
+    }
+
+    const newAttempt: StudentAttempt = {
+      id: attemptId,
+      examSessionId: session.id,
+      nisn: student.nisn,
+      studentName: student.name,
+      classRoom: student.classRoom,
+      startTime: new Date().toISOString(),
+      answers: {},
+      doubtfulAnswers: [],
+      isSubmitted: false,
+      score: 0,
+      correctCount: 0,
+      incorrectCount: 0,
+      unansweredCount: questionsForSubject.length,
+      antiCheatWarnings: 0
+    };
+
+    await setDoc(doc(firestoreDb, "attempts", attemptId), newAttempt).catch(err => {
+      handleFirestoreError(err, OperationType.CREATE, `attempts/${attemptId}`);
+    });
+
+    res.json({
+      message: "Sesi ujian baru berhasil dimulai.",
+      attempt: newAttempt,
+      session,
+      questions: questionsForSubject
+    });
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Gagal memulai sesi ujian." });
   }
-
-  // Create new Exam Attempt
-  const attemptId = `att_${session.id}_${nisn}`;
-  const questionsForSubject = db.questions.filter(q => q.subject === session.subject);
-
-  if (questionsForSubject.length === 0) {
-    return res.status(400).json({ message: `Belum ada bank soal tersedia untuk mata pelajaran ${session.subject}.` });
-  }
-
-  const newAttempt: StudentAttempt = {
-    id: attemptId,
-    examSessionId: session.id,
-    nisn: student.nisn,
-    studentName: student.name,
-    classRoom: student.classRoom,
-    startTime: new Date().toISOString(),
-    answers: {},
-    doubtfulAnswers: [],
-    isSubmitted: false,
-    score: 0,
-    correctCount: 0,
-    incorrectCount: 0,
-    unansweredCount: questionsForSubject.length,
-    antiCheatWarnings: 0
-  };
-
-  db.attempts.push(newAttempt);
-  saveDB(db);
-
-  res.json({
-    message: "Sesi ujian baru berhasil dimulai.",
-    attempt: newAttempt,
-    session,
-    questions: questionsForSubject
-  });
 });
 
 // 3. Real-time Save state (answers + doubtful tracker)
-app.post("/api/exam/update", (req, res) => {
+app.post("/api/exam/update", async (req, res) => {
   const { attemptId, answers, doubtfulAnswers, antiCheatWarnings } = req.body;
 
   if (!attemptId) {
     return res.status(400).json({ message: "Attempt ID diperlukan." });
   }
 
-  const idx = db.attempts.findIndex(a => a.id === attemptId);
-  if (idx === -1) {
-    return res.status(404).json({ message: "Sesi ujian aktif tidak ditemukan." });
-  }
+  try {
+    const attemptDocRef = doc(firestoreDb, "attempts", attemptId);
+    const attemptDoc = await getDoc(attemptDocRef).catch(err => {
+      handleFirestoreError(err, OperationType.GET, `attempts/${attemptId}`);
+    });
+    
+    if (!attemptDoc || !attemptDoc.exists()) {
+      return res.status(404).json({ message: "Sesi ujian aktif tidak ditemukan." });
+    }
 
-  if (db.attempts[idx].isSubmitted) {
-    return res.status(400).json({ message: "Sesi ujian ini telah dipasrahkan/selesai." });
-  }
+    const attempt = attemptDoc.data() as StudentAttempt;
 
-  // Update in-flight state
-  if (answers !== undefined) {
-    db.attempts[idx].answers = { ...db.attempts[idx].answers, ...answers };
-  }
-  if (doubtfulAnswers !== undefined) {
-    db.attempts[idx].doubtfulAnswers = doubtfulAnswers;
-  }
-  if (antiCheatWarnings !== undefined) {
-    db.attempts[idx].antiCheatWarnings = antiCheatWarnings;
-  }
+    if (attempt.isSubmitted) {
+      return res.status(400).json({ message: "Sesi ujian ini telah dipasrahkan/selesai." });
+    }
 
-  // Recalculate unanswered count during sync
-  const session = db.sessions.find(s => s.id === db.attempts[idx].examSessionId);
-  if (session) {
-    const questionsForSubject = db.questions.filter(q => q.subject === session.subject);
-    const answeredCount = Object.keys(db.attempts[idx].answers).length;
-    db.attempts[idx].unansweredCount = Math.max(0, questionsForSubject.length - answeredCount);
-  }
+    // Update in-flight state
+    if (answers !== undefined) {
+      attempt.answers = { ...attempt.answers, ...answers };
+    }
+    if (doubtfulAnswers !== undefined) {
+      attempt.doubtfulAnswers = doubtfulAnswers;
+    }
+    if (antiCheatWarnings !== undefined) {
+      attempt.antiCheatWarnings = antiCheatWarnings;
+    }
 
-  saveDB(db);
-  res.json({ success: true, attempt: db.attempts[idx] });
+    // Recalculate unanswered count during sync
+    const sessionDoc = await getDoc(doc(firestoreDb, "sessions", attempt.examSessionId)).catch(err => {
+      handleFirestoreError(err, OperationType.GET, `sessions/${attempt.examSessionId}`);
+    });
+    
+    if (sessionDoc && sessionDoc.exists()) {
+      const session = sessionDoc.data() as ExamSession;
+      const allQ = await getAllQuestions();
+      const questionsForSubject = allQ.filter(q => q.subject === session.subject);
+      const answeredCount = Object.keys(attempt.answers).length;
+      attempt.unansweredCount = Math.max(0, questionsForSubject.length - answeredCount);
+    }
+
+    await setDoc(attemptDocRef, attempt).catch(err => {
+      handleFirestoreError(err, OperationType.UPDATE, `attempts/${attemptId}`);
+    });
+    
+    res.json({ success: true, attempt });
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Gagal sinkronisasi data real-time." });
+  }
 });
 
 // 4. Submit active exam (calculates correctness percentage, score, updates flags)
-app.post("/api/exam/submit", (req, res) => {
+app.post("/api/exam/submit", async (req, res) => {
   const { attemptId, finalAnswers } = req.body;
 
   if (!attemptId) {
     return res.status(400).json({ message: "Attempt ID tidak lengkap." });
   }
 
-  const idx = db.attempts.findIndex(a => a.id === attemptId);
-  if (idx === -1) {
-    return res.status(404).json({ message: "Sesi ujian tidak ditemukan." });
-  }
-
-  const attempt = db.attempts[idx];
-  if (attempt.isSubmitted) {
-    return res.json({ message: "Sudah disubmit sebelumnya.", attempt });
-  }
-
-  // Incorporate any final answers
-  if (finalAnswers) {
-    attempt.answers = { ...attempt.answers, ...finalAnswers };
-  }
-
-  // Fetch subject questions to grade
-  const session = db.sessions.find(s => s.id === attempt.examSessionId);
-  if (!session) {
-    return res.status(404).json({ message: "Data mata pelajaran sesi ujian hilang." });
-  }
-
-  const questions = db.questions.filter(q => q.subject === session.subject);
-
-  let correct = 0;
-  let incorrect = 0;
-  let unanswered = 0;
-
-  questions.forEach(q => {
-    const studentAnswer = attempt.answers[q.id];
-    if (!studentAnswer) {
-      unanswered++;
-    } else if (studentAnswer.toUpperCase().trim() === q.correctAnswer.toUpperCase().trim()) {
-      correct++;
-    } else {
-      incorrect++;
+  try {
+    const attemptDocRef = doc(firestoreDb, "attempts", attemptId);
+    const attemptDoc = await getDoc(attemptDocRef).catch(err => {
+      handleFirestoreError(err, OperationType.GET, `attempts/${attemptId}`);
+    });
+    if (!attemptDoc || !attemptDoc.exists()) {
+      return res.status(404).json({ message: "Sesi ujian tidak ditemukan." });
     }
-  });
 
-  // Calculate final score out of 100
-  const score = questions.length > 0 ? parseFloat(((correct / questions.length) * 100).toFixed(2)) : 0;
+    const attempt = attemptDoc.data() as StudentAttempt;
+    if (attempt.isSubmitted) {
+      return res.json({ message: "Sudah disubmit sebelumnya.", attempt });
+    }
 
-  attempt.isSubmitted = true;
-  attempt.correctCount = correct;
-  attempt.incorrectCount = incorrect;
-  attempt.unansweredCount = unanswered;
-  attempt.score = score;
-  attempt.endTime = new Date().toISOString();
+    // Incorporate any final answers
+    if (finalAnswers) {
+      attempt.answers = { ...attempt.answers, ...finalAnswers };
+    }
 
-  // Commit update to database JSON file
-  db.attempts[idx] = attempt;
-  saveDB(db);
+    // Fetch subject questions to grade
+    const sessionDoc = await getDoc(doc(firestoreDb, "sessions", attempt.examSessionId)).catch(err => {
+      handleFirestoreError(err, OperationType.GET, `sessions/${attempt.examSessionId}`);
+    });
+    if (!sessionDoc || !sessionDoc.exists()) {
+      return res.status(404).json({ message: "Data mata pelajaran sesi ujian hilang." });
+    }
 
-  res.json({
-    message: "Ujian selesai dikoreksi dan dikumpulkan otomatis oleh sistem.",
-    attempt
-  });
+    const session = sessionDoc.data() as ExamSession;
+    const allQ = await getAllQuestions();
+    const questions = allQ.filter(q => q.subject === session.subject);
+
+    let correct = 0;
+    let incorrect = 0;
+    let unanswered = 0;
+
+    questions.forEach(q => {
+      const studentAnswer = attempt.answers[q.id];
+      if (!studentAnswer) {
+        unanswered++;
+      } else if (studentAnswer.toUpperCase().trim() === q.correctAnswer.toUpperCase().trim()) {
+        correct++;
+      } else {
+        incorrect++;
+      }
+    });
+
+    // Calculate final score out of 100
+    const score = questions.length > 0 ? parseFloat(((correct / questions.length) * 100).toFixed(2)) : 0;
+
+    attempt.isSubmitted = true;
+    attempt.correctCount = correct;
+    attempt.incorrectCount = incorrect;
+    attempt.unansweredCount = unanswered;
+    attempt.score = score;
+    attempt.endTime = new Date().toISOString();
+
+    await setDoc(attemptDocRef, attempt).catch(err => {
+      handleFirestoreError(err, OperationType.UPDATE, `attempts/${attemptId}`);
+    });
+
+    res.json({
+      message: "Ujian selesai dikoreksi dan dikumpulkan otomatis oleh sistem.",
+      attempt
+    });
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Gagal mengumpulkan ujian." });
+  }
 });
 
 // API: Result Overview & Report Analysis for Teacher Panel
-app.get("/api/results", (req, res) => {
-  // Let's rich map results with related subjects/stats
-  const resultsInfo = db.attempts.map(attempt => {
-    const session = db.sessions.find(s => s.id === attempt.examSessionId);
-    return {
-      ...attempt,
-      subject: session ? session.subject : "Mata Pelajaran Tidak Diketahui",
-      duration: session ? session.duration : 0,
-      sessionDate: session ? session.date : "",
-      tokenUsed: session ? session.token : ""
-    };
-  });
-  res.json(resultsInfo);
-});
+app.get("/api/results", async (req, res) => {
+  try {
+    const querySnapshot = await getDocs(collection(firestoreDb, "attempts")).catch(err => {
+      handleFirestoreError(err, OperationType.LIST, "attempts");
+    });
+    const attempts: StudentAttempt[] = [];
+    if (querySnapshot) {
+      querySnapshot.forEach(doc => {
+        attempts.push(doc.data() as StudentAttempt);
+      });
+    }
 
+    const allSess = await getAllSessions().catch(() => [] as ExamSession[]);
+
+    const resultsInfo = attempts.map(attempt => {
+      const session = allSess.find(s => s.id === attempt.examSessionId);
+      return {
+        ...attempt,
+        subject: session ? session.subject : "Mata Pelajaran Tidak Diketahui",
+        duration: session ? session.duration : 0,
+        sessionDate: session ? session.date : "",
+        tokenUsed: session ? session.token : ""
+      };
+    });
+    res.json(resultsInfo);
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Gagal mengambil data riwayat nilai." });
+  }
+});
 
 // Dev & Production serving middlewares logic
 async function startServer() {
